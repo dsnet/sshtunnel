@@ -39,6 +39,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -116,7 +117,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		sigc := make(chan os.Signal, 1)
-		signal.Notify(sigc, os.Interrupt)
+		signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
 		log.Printf("received %v - initiating shutdown", <-sigc)
 		cancel()
 	}()
