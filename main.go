@@ -296,6 +296,12 @@ func bindTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel) {
 			bindCtx, cancel := context.WithCancel(ctx)
 			defer cancel()
 			go func() {
+				if err := cl.Wait(); err != nil {
+					log.Printf("(%v) SSH error: %v", tunn, err)
+				}
+				cancel()
+			}()
+			go func() {
 				<-bindCtx.Done()
 				ln.Close()
 			}()
