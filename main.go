@@ -375,14 +375,16 @@ func dialTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel, client *ss
 	go func() {
 		defer wg2.Done()
 		defer cancel()
-		_, cpyErr := io.Copy(cn1, cn2)
-		once.Do(func() { err = cpyErr })
+		if _, cpyErr := io.Copy(cn1, cn2); cpyErr != nil {
+			once.Do(func() { err = cpyErr })
+		}
 	}()
 	go func() {
 		defer wg2.Done()
 		defer cancel()
-		_, cpyErr := io.Copy(cn2, cn1)
-		once.Do(func() { err = cpyErr })
+		if _, cpyErr := io.Copy(cn2, cn1); cpyErr != nil {
+			once.Do(func() { err = cpyErr })
+		}
 	}()
 	wg2.Wait()
 	if err != nil {
