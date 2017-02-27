@@ -164,6 +164,7 @@ func loadConfig(conf string) []tunnel {
 			log.Fatalf("error opening log file: %v", err)
 		}
 		f.Write(logBuf.Bytes()) // Write log output prior to this point
+		log.Printf("suppress stderr logging (redirected to %s)", f.Name())
 		log.SetOutput(f)
 	}
 
