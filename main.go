@@ -39,6 +39,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -135,7 +136,7 @@ func main() {
 
 func loadConfig(conf string) []tunnel {
 	var logBuf bytes.Buffer
-	log.SetFlags(log.Ldate | log.Ltime)
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 	log.SetOutput(io.MultiWriter(os.Stderr, &logBuf))
 
 	// Load configuration file.
@@ -275,9 +276,10 @@ func bindTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel) {
 				User: tunn.user, Auth: tunn.auth, Timeout: 5 * time.Second,
 			})
 			if err != nil {
-				log.Printf("(%v) SSH error: %v", tunn, err)
+				log.Printf("(%v) SSH dial error: %v", tunn, err)
 				return
 			}
+			go keepAliveMonitor(tunn, cl)
 			defer cl.Close()
 
 			// Attempt to bind to the inbound socket.
@@ -297,9 +299,7 @@ func bindTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel) {
 			bindCtx, cancel := context.WithCancel(ctx)
 			defer cancel()
 			go func() {
-				if err := cl.Wait(); err != nil {
-					log.Printf("(%v) SSH error: %v", tunn, err)
-				}
+				cl.Wait()
 				cancel()
 			}()
 			go func() {
@@ -388,4 +388,47 @@ func dialTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel, client *ss
 		}
 	}()
 	wg2.Wait()
+}
+
+// keepAliveMonitor periodically sends messages to invoke a response.
+// If the server does not respond after some period of time,
+// assume that the underlying net.Conn abruptly died.
+func keepAliveMonitor(tunn tunnel, client *ssh.Client) {
+	const (
+		aliveInterval = 30 * time.Second
+		aliveCountMax = 4
+	)
+
+	// Detect when the SSH connection is closed.
+	wait := make(chan error, 1)
+	go func() {
+		wait <- client.Wait()
+	}()
+
+	// Repeatedly check if the remote server is still alive.
+	var aliveCount int32
+	ticker := time.NewTicker(aliveInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case err := <-wait:
+			if err != nil && err != io.EOF {
+				log.Printf("(%v) SSH error: %v", tunn, err)
+			}
+			return
+		case <-ticker.C:
+			if n := atomic.AddInt32(&aliveCount, 1); n > aliveCountMax {
+				log.Printf("(%v) SSH keep-alive termination", tunn)
+				client.Close()
+				return
+			}
+		}
+
+		go func() {
+			_, _, err := client.SendRequest("keepalive@openssh.com", true, nil)
+			if err == nil {
+				atomic.StoreInt32(&aliveCount, 0)
+			}
+		}()
+	}
 }
