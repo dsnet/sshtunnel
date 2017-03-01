@@ -270,16 +270,17 @@ func bindTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel) {
 	defer wg.Done()
 
 	for {
+		var once sync.Once // Only print errors once per session
 		func() {
 			// Connect to the server host via SSH.
 			cl, err := ssh.Dial("tcp", tunn.hostAddr, &ssh.ClientConfig{
 				User: tunn.user, Auth: tunn.auth, Timeout: 5 * time.Second,
 			})
 			if err != nil {
-				log.Printf("(%v) SSH dial error: %v", tunn, err)
+				once.Do(func() { log.Printf("(%v) SSH dial error: %v", tunn, err) })
 				return
 			}
-			go keepAliveMonitor(tunn, cl)
+			go keepAliveMonitor(&once, tunn, cl)
 			defer cl.Close()
 
 			// Attempt to bind to the inbound socket.
@@ -291,7 +292,7 @@ func bindTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel) {
 				ln, err = cl.Listen("tcp", tunn.bindAddr)
 			}
 			if err != nil {
-				log.Printf("(%v) bind error: %v", tunn, err)
+				once.Do(func() { log.Printf("(%v) bind error: %v", tunn, err) })
 				return
 			}
 
@@ -304,6 +305,7 @@ func bindTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel) {
 			}()
 			go func() {
 				<-bindCtx.Done()
+				once.Do(func() {}) // Suppress future errors
 				ln.Close()
 			}()
 
@@ -314,12 +316,7 @@ func bindTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel) {
 			for {
 				cn1, err := ln.Accept()
 				if err != nil {
-					select {
-					case <-bindCtx.Done():
-						// Don't print accept errors upon closing.
-					default:
-						log.Printf("(%v) accept error: %v", tunn, err)
-					}
+					once.Do(func() { log.Printf("(%v) accept error: %v", tunn, err) })
 					return
 				}
 				wg.Add(1)
@@ -393,7 +390,7 @@ func dialTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel, client *ss
 // keepAliveMonitor periodically sends messages to invoke a response.
 // If the server does not respond after some period of time,
 // assume that the underlying net.Conn abruptly died.
-func keepAliveMonitor(tunn tunnel, client *ssh.Client) {
+func keepAliveMonitor(once *sync.Once, tunn tunnel, client *ssh.Client) {
 	const (
 		aliveInterval = 30 * time.Second
 		aliveCountMax = 4
@@ -401,9 +398,7 @@ func keepAliveMonitor(tunn tunnel, client *ssh.Client) {
 
 	// Detect when the SSH connection is closed.
 	wait := make(chan error, 1)
-	go func() {
-		wait <- client.Wait()
-	}()
+	go func() { wait <- client.Wait() }()
 
 	// Repeatedly check if the remote server is still alive.
 	var aliveCount int32
@@ -413,12 +408,12 @@ func keepAliveMonitor(tunn tunnel, client *ssh.Client) {
 		select {
 		case err := <-wait:
 			if err != nil && err != io.EOF {
-				log.Printf("(%v) SSH error: %v", tunn, err)
+				once.Do(func() { log.Printf("(%v) SSH error: %v", tunn, err) })
 			}
 			return
 		case <-ticker.C:
 			if n := atomic.AddInt32(&aliveCount, 1); n > aliveCountMax {
-				log.Printf("(%v) SSH keep-alive termination", tunn)
+				once.Do(func() { log.Printf("(%v) SSH keep-alive termination", tunn) })
 				client.Close()
 				return
 			}
