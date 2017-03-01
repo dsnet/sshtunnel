@@ -280,7 +280,8 @@ func bindTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel) {
 				once.Do(func() { log.Printf("(%v) SSH dial error: %v", tunn, err) })
 				return
 			}
-			go keepAliveMonitor(&once, tunn, cl)
+			wg.Add(1)
+			go keepAliveMonitor(&once, wg, tunn, cl)
 			defer cl.Close()
 
 			// Attempt to bind to the inbound socket.
@@ -390,7 +391,8 @@ func dialTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel, client *ss
 // keepAliveMonitor periodically sends messages to invoke a response.
 // If the server does not respond after some period of time,
 // assume that the underlying net.Conn abruptly died.
-func keepAliveMonitor(once *sync.Once, tunn tunnel, client *ssh.Client) {
+func keepAliveMonitor(once *sync.Once, wg *sync.WaitGroup, tunn tunnel, client *ssh.Client) {
+	defer wg.Done()
 	const (
 		aliveInterval = 30 * time.Second
 		aliveCountMax = 4
@@ -398,7 +400,11 @@ func keepAliveMonitor(once *sync.Once, tunn tunnel, client *ssh.Client) {
 
 	// Detect when the SSH connection is closed.
 	wait := make(chan error, 1)
-	go func() { wait <- client.Wait() }()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		wait <- client.Wait()
+	}()
 
 	// Repeatedly check if the remote server is still alive.
 	var aliveCount int32
@@ -419,7 +425,9 @@ func keepAliveMonitor(once *sync.Once, tunn tunnel, client *ssh.Client) {
 			}
 		}
 
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			_, _, err := client.SendRequest("keepalive@openssh.com", true, nil)
 			if err == nil {
 				atomic.StoreInt32(&aliveCount, 0)
