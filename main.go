@@ -36,13 +36,13 @@ import (
 	"os/signal"
 	"os/user"
 	"path"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/dsnet/golib/jsonutil"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -145,7 +145,7 @@ func loadConfig(conf string) []tunnel {
 	if err != nil {
 		log.Fatalf("unable to read config: %v", err)
 	}
-	c = stripJSON(c)
+	c, _ = jsonutil.Minify(c)
 	if err := json.Unmarshal(c, &config); err != nil {
 		log.Fatalf("unable to decode config: %v", err)
 	}
@@ -238,32 +238,6 @@ func loadConfig(conf string) []tunnel {
 	}
 
 	return tunns
-}
-
-// stripJSON strips superfluous components from the input string to make it
-// compliant with the JSON specification.
-// If the input is valid JSON, the output is also guaranteed to be valid.
-func stripJSON(s []byte) []byte {
-	// TODO(dsnet): This is very basic stripping of "//" comments that are
-	// always preceded by whitespace.
-	// It does not handle "//" comments that contain quotes after valid JSON.
-	// It does not handle "/*" and "*/" style comments.
-	// Handling those requires a legitimate parser.
-	reComment := regexp.MustCompile(`(^\s*//)|(\s*//[^"]*$)`)
-	ss := bytes.Split(s, []byte{'\n'})
-	for i, s := range ss {
-		if j := reComment.FindIndex(s); j != nil {
-			ss[i] = s[:j[0]]
-		}
-	}
-	s = bytes.Join(ss, []byte{'\n'})
-
-	// Strip trailing commas from last element in objects and arrays.
-	reComma := regexp.MustCompile(`,(?:\s*\n(?:\n|\s)*(?:\}|\]))`)
-	for _, i := range reComma.FindAllIndex(s, -1) {
-		s[i[0]] = ' ' // Convert comma to space
-	}
-	return s
 }
 
 func bindTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel) {
