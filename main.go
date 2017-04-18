@@ -119,7 +119,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\t%s CONFIG_PATH\n", os.Args[0])
 		os.Exit(1)
 	}
-	tunns := loadConfig(os.Args[1])
+	tunns, closer := loadConfig(os.Args[1])
+	defer closer()
 
 	// Setup signal handler to initiate shutdown.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -141,7 +142,7 @@ func main() {
 	wg.Wait()
 }
 
-func loadConfig(conf string) []tunnel {
+func loadConfig(conf string) (tunns []tunnel, closer func() error) {
 	var logBuf bytes.Buffer
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 	log.SetOutput(io.MultiWriter(os.Stderr, &logBuf))
@@ -166,6 +167,7 @@ func loadConfig(conf string) []tunnel {
 	// Setup the log output.
 	if config.LogFile == "" {
 		log.SetOutput(os.Stderr)
+		closer = func() error { return nil }
 	} else {
 		f, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0664)
 		if err != nil {
@@ -174,6 +176,7 @@ func loadConfig(conf string) []tunnel {
 		f.Write(logBuf.Bytes()) // Write log output prior to this point
 		log.Printf("suppress stderr logging (redirected to %s)", f.Name())
 		log.SetOutput(f)
+		closer = f.Close
 	}
 
 	// Parse all of the private keys.
@@ -204,7 +207,6 @@ func loadConfig(conf string) []tunnel {
 	}
 
 	// Parse all of the tunnels.
-	var tunns []tunnel
 	for _, t := range config.Tunnels {
 		var tunn tunnel
 		tt := strings.Fields(t.Tunnel)
@@ -254,7 +256,7 @@ func loadConfig(conf string) []tunnel {
 		tunns = append(tunns, tunn)
 	}
 
-	return tunns
+	return tunns, closer
 }
 
 func bindTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel) {
