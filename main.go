@@ -27,6 +27,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -47,6 +48,9 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
+
+// Version of the sshtunnel binary. May be set by linker when building.
+var version string
 
 type TunnelConfig struct {
 	// LogFile is where the proxy daemon will direct its output log.
@@ -147,6 +151,11 @@ func loadConfig(conf string) (tunns []tunnel, closer func() error) {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 	log.SetOutput(io.MultiWriter(os.Stderr, &logBuf))
 
+	var hash string
+	if b, _ := ioutil.ReadFile(os.Args[0]); len(b) > 0 {
+		hash = fmt.Sprintf("%x", sha256.Sum256(b))
+	}
+
 	// Load configuration file.
 	var config TunnelConfig
 	c, err := ioutil.ReadFile(conf)
@@ -157,11 +166,17 @@ func loadConfig(conf string) (tunns []tunnel, closer func() error) {
 	if err := json.Unmarshal(c, &config); err != nil {
 		log.Fatalf("unable to decode config: %v", err)
 	}
+
+	// Print the configuration.
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "\t")
-	enc.Encode(&config)
+	enc.Encode(struct {
+		TunnelConfig
+		BinaryVersion string `json:",omitempty"`
+		BinarySHA256  string `json:",omitempty"`
+	}{config, version, hash})
 	log.Printf("loaded config:\n%s", b.String())
 
 	// Setup the log output.
