@@ -7,6 +7,10 @@ securely tunnel TCP connections in forward and reverse proxy mode.
 This tool provides equivalent functionality to using the `ssh` command's
 `-L` and `-R` flags.
 
+Consider using [github.com/dsnet/udptunnel](https://github.com/dsnet/udptunnel)
+if running behind a NAT that drops long-running TCP connections, but allows
+UDP traffic to reliably pass through.
+
 ## Usage ##
 
 Build the daemon:
@@ -18,6 +22,7 @@ Create a configuration file:
 ```javascript
 {
 	"KeyFiles": ["/path/to/key.priv"],
+	"KnownHostFiles": ["/path/to/known_hosts"],
 	"Tunnels": [{
 		// Forward tunnel (locally binded socket proxies to remote target).
 		"Tunnel": "bind_address:port -> dial_address:port",
@@ -37,6 +42,6 @@ ssh $USER@$HOST -i /path/to/key.priv -L $BIND_ADDRESS:$BIND_PORT:$DIAL_ADDRESS:$
 ssh $USER@$HOST -i /path/to/key.priv -R $BIND_ADDRESS:$BIND_PORT:$DIAL_ADDRESS:$DIAL_PORT
 ```
 
-Start the daemon (assuming $GOPATH/bin is in your $PATH):
+Start the daemon (assuming `$GOPATH/bin` is in your `$PATH`):
 
 ```sshtunnel /path/to/config.json```
