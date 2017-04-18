@@ -9,6 +9,7 @@
 //
 //	{
 //		"KeyFiles": ["/path/to/key.priv"],
+//		"KnownHostFiles": ["/path/to/known_hosts"],
 //		"Tunnels": [{
 //			// Forward tunnel (locally binded socket proxies to remote target).
 //			"Tunnel": "bind_address:port -> dial_address:port",
@@ -44,6 +45,7 @@ import (
 
 	"github.com/dsnet/golib/jsonutil"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 type TunnelConfig struct {
@@ -53,6 +55,10 @@ type TunnelConfig struct {
 
 	// KeyFiles is a list of SSH private key files.
 	KeyFiles []string
+
+	// KnownHostFiles is a list of key database files for host public keys
+	// in the OpenSSH known_hosts file format.
+	KnownHostFiles []string
 
 	// Tunnels is a list of tunnels to establish.
 	// The same set of SSH keys will be used to authenticate the
@@ -87,6 +93,7 @@ type TunnelConfig struct {
 
 type tunnel struct {
 	auth     []ssh.AuthMethod
+	hostKeys ssh.HostKeyCallback
 	mode     byte // '>' for forward, '<' for reverse
 	user     string
 	hostAddr string
@@ -169,23 +176,32 @@ func loadConfig(conf string) []tunnel {
 		log.SetOutput(f)
 	}
 
-	// Parse all of the keys.
+	// Parse all of the private keys.
 	var keys []ssh.Signer
 	if len(config.KeyFiles) == 0 {
-		log.Fatal("no keys specified")
+		log.Fatal("no private keys specified")
 	}
 	for _, kf := range config.KeyFiles {
 		b, err := ioutil.ReadFile(kf)
 		if err != nil {
-			log.Fatalf("key error: %v", err)
+			log.Fatalf("private key error: %v", err)
 		}
 		k, err := ssh.ParsePrivateKey(b)
 		if err != nil {
-			log.Fatalf("key error: %v", err)
+			log.Fatalf("private key error: %v", err)
 		}
 		keys = append(keys, k)
 	}
 	auth := []ssh.AuthMethod{ssh.PublicKeys(keys...)}
+
+	// Parse all of the host public keys.
+	if len(config.KnownHostFiles) == 0 {
+		log.Fatal("no host public keys specified")
+	}
+	hostKeys, err := knownhosts.New(config.KnownHostFiles...)
+	if err != nil {
+		log.Fatalf("public key error: %v", err)
+	}
 
 	// Parse all of the tunnels.
 	var tunns []tunnel
@@ -234,6 +250,7 @@ func loadConfig(conf string) []tunnel {
 		}
 
 		tunn.auth = auth
+		tunn.hostKeys = hostKeys
 		tunns = append(tunns, tunn)
 	}
 
@@ -248,7 +265,10 @@ func bindTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel) {
 		func() {
 			// Connect to the server host via SSH.
 			cl, err := ssh.Dial("tcp", tunn.hostAddr, &ssh.ClientConfig{
-				User: tunn.user, Auth: tunn.auth, Timeout: 5 * time.Second,
+				User:            tunn.user,
+				Auth:            tunn.auth,
+				HostKeyCallback: tunn.hostKeys,
+				Timeout:         5 * time.Second,
 			})
 			if err != nil {
 				once.Do(func() { log.Printf("(%v) SSH dial error: %v", tunn, err) })
