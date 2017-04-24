@@ -274,6 +274,8 @@ func loadConfig(conf string) (tunns []tunnel, closer func() error) {
 	return tunns, closer
 }
 
+var retryPeriod = 30 * time.Second
+
 func bindTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel) {
 	defer wg.Done()
 
@@ -339,7 +341,7 @@ func bindTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(30 * time.Second):
+		case <-time.After(retryPeriod):
 			log.Printf("(%v) retrying...", tunn)
 		}
 	}
