@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -16,6 +15,10 @@ import (
 
 	"golang.org/x/crypto/ssh"
 )
+
+type logger interface {
+	Printf(string, ...interface{})
+}
 
 type tunnel struct {
 	auth     []ssh.AuthMethod
@@ -27,6 +30,8 @@ type tunnel struct {
 	dialAddr string
 
 	keepAlive KeepAliveConfig
+
+	log logger
 }
 
 func (t tunnel) String() string {
@@ -57,7 +62,7 @@ func (t tunnel) bindTunnel(ctx context.Context, wg *sync.WaitGroup) {
 				Timeout:         5 * time.Second,
 			})
 			if err != nil {
-				once.Do(func() { log.Printf("(%v) SSH dial error: %v", t, err) })
+				once.Do(func() { t.log.Printf("(%v) SSH dial error: %v", t, err) })
 				return
 			}
 			wg.Add(1)
@@ -73,7 +78,7 @@ func (t tunnel) bindTunnel(ctx context.Context, wg *sync.WaitGroup) {
 				ln, err = cl.Listen("tcp", t.bindAddr)
 			}
 			if err != nil {
-				once.Do(func() { log.Printf("(%v) bind error: %v", t, err) })
+				once.Do(func() { t.log.Printf("(%v) bind error: %v", t, err) })
 				return
 			}
 
@@ -90,14 +95,14 @@ func (t tunnel) bindTunnel(ctx context.Context, wg *sync.WaitGroup) {
 				ln.Close()
 			}()
 
-			log.Printf("(%v) binded tunnel", t)
-			defer log.Printf("(%v) collapsed tunnel", t)
+			t.log.Printf("(%v) binded tunnel", t)
+			defer t.log.Printf("(%v) collapsed tunnel", t)
 
 			// Accept all incoming connections.
 			for {
 				cn1, err := ln.Accept()
 				if err != nil {
-					once.Do(func() { log.Printf("(%v) accept error: %v", t, err) })
+					once.Do(func() { t.log.Printf("(%v) accept error: %v", t, err) })
 					return
 				}
 				wg.Add(1)
@@ -109,7 +114,7 @@ func (t tunnel) bindTunnel(ctx context.Context, wg *sync.WaitGroup) {
 		case <-ctx.Done():
 			return
 		case <-time.After(retryPeriod):
-			log.Printf("(%v) retrying...", t)
+			t.log.Printf("(%v) retrying...", t)
 		}
 	}
 }
@@ -135,7 +140,7 @@ func (t tunnel) dialTunnel(ctx context.Context, wg *sync.WaitGroup, client *ssh.
 		cn2, err = net.Dial("tcp", t.dialAddr)
 	}
 	if err != nil {
-		log.Printf("(%v) dial error: %v", t, err)
+		t.log.Printf("(%v) dial error: %v", t, err)
 		return
 	}
 
@@ -144,8 +149,8 @@ func (t tunnel) dialTunnel(ctx context.Context, wg *sync.WaitGroup, client *ssh.
 		cn2.Close()
 	}()
 
-	log.Printf("(%v) connection established", t)
-	defer log.Printf("(%v) connection closed", t)
+	t.log.Printf("(%v) connection established", t)
+	defer t.log.Printf("(%v) connection closed", t)
 
 	// Copy bytes from one connection to the other until one side closes.
 	var once sync.Once
@@ -155,7 +160,7 @@ func (t tunnel) dialTunnel(ctx context.Context, wg *sync.WaitGroup, client *ssh.
 		defer wg2.Done()
 		defer cancel()
 		if _, err := io.Copy(cn1, cn2); err != nil {
-			once.Do(func() { log.Printf("(%v) connection error: %v", t, err) })
+			once.Do(func() { t.log.Printf("(%v) connection error: %v", t, err) })
 		}
 		once.Do(func() {}) // Suppress future errors
 	}()
@@ -163,7 +168,7 @@ func (t tunnel) dialTunnel(ctx context.Context, wg *sync.WaitGroup, client *ssh.
 		defer wg2.Done()
 		defer cancel()
 		if _, err := io.Copy(cn2, cn1); err != nil {
-			once.Do(func() { log.Printf("(%v) connection error: %v", t, err) })
+			once.Do(func() { t.log.Printf("(%v) connection error: %v", t, err) })
 		}
 		once.Do(func() {}) // Suppress future errors
 	}()
@@ -195,12 +200,12 @@ func (t tunnel) keepAliveMonitor(once *sync.Once, wg *sync.WaitGroup, client *ss
 		select {
 		case err := <-wait:
 			if err != nil && err != io.EOF {
-				once.Do(func() { log.Printf("(%v) SSH error: %v", t, err) })
+				once.Do(func() { t.log.Printf("(%v) SSH error: %v", t, err) })
 			}
 			return
 		case <-ticker.C:
 			if n := atomic.AddInt32(&aliveCount, 1); n > int32(t.keepAlive.CountMax) {
-				once.Do(func() { log.Printf("(%v) SSH keep-alive termination", t) })
+				once.Do(func() { t.log.Printf("(%v) SSH keep-alive termination", t) })
 				client.Close()
 				return
 			}

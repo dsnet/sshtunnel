@@ -22,6 +22,12 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+type testLogger struct {
+	*testing.T // Already has Fatalf method
+}
+
+func (t testLogger) Printf(f string, x ...interface{}) { t.Logf(f, x...) }
+
 func TestTunnel(t *testing.T) {
 	// Set retry period shorter to make test run faster.
 	oldRetryPeriod := retryPeriod
@@ -77,6 +83,7 @@ func TestTunnel(t *testing.T) {
 		hostAddr: srvLn0.Addr().String(),
 		bindAddr: tcpLn0.Addr().String(),
 		dialAddr: tcpLn1.Addr().String(),
+		log:      testLogger{t},
 	}
 	tn1 := tunnel{
 		auth:     []ssh.AuthMethod{ssh.PublicKeys(clientPriv1)},
@@ -86,12 +93,13 @@ func TestTunnel(t *testing.T) {
 		hostAddr: srvLn1.Addr().String(),
 		bindAddr: tcpLn1.Addr().String(),
 		dialAddr: tcpLn2.Addr().String(),
+		log:      testLogger{t},
 	}
 
 	// Start the SSH client tunnels.
 	wg.Add(2)
-	go bindTunnel(ctx, wg, tn0)
-	go bindTunnel(ctx, wg, tn1)
+	go tn0.bindTunnel(ctx, wg)
+	go tn1.bindTunnel(ctx, wg)
 
 	done := make(chan bool, 10)
 

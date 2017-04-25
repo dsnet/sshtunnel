@@ -115,10 +115,9 @@ type KeepAliveConfig struct {
 	CountMax uint
 }
 
-func loadConfig(conf string) (tunns []tunnel, closer func() error) {
+func loadConfig(conf string) (tunns []tunnel, logger *log.Logger, closer func() error) {
 	var logBuf bytes.Buffer
-	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
-	log.SetOutput(io.MultiWriter(os.Stderr, &logBuf))
+	logger = log.New(io.MultiWriter(os.Stderr, &logBuf), "", log.Ldate|log.Ltime|log.Lshortfile)
 
 	var hash string
 	if b, _ := ioutil.ReadFile(os.Args[0]); len(b) > 0 {
@@ -129,11 +128,11 @@ func loadConfig(conf string) (tunns []tunnel, closer func() error) {
 	var config TunnelConfig
 	c, err := ioutil.ReadFile(conf)
 	if err != nil {
-		log.Fatalf("unable to read config: %v", err)
+		logger.Fatalf("unable to read config: %v", err)
 	}
 	c, _ = jsonutil.Minify(c)
 	if err := json.Unmarshal(c, &config); err != nil {
-		log.Fatalf("unable to decode config: %v", err)
+		logger.Fatalf("unable to decode config: %v", err)
 	}
 	for _, t := range config.Tunnels {
 		if config.KeepAlive == nil && t.KeepAlive == nil {
@@ -152,36 +151,36 @@ func loadConfig(conf string) (tunns []tunnel, closer func() error) {
 		BinaryVersion string `json:",omitempty"`
 		BinarySHA256  string `json:",omitempty"`
 	}{config, version, hash})
-	log.Printf("loaded config:\n%s", b.String())
+	logger.Printf("loaded config:\n%s", b.String())
 
 	// Setup the log output.
 	if config.LogFile == "" {
-		log.SetOutput(os.Stderr)
+		logger.SetOutput(os.Stderr)
 		closer = func() error { return nil }
 	} else {
 		f, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0664)
 		if err != nil {
-			log.Fatalf("error opening log file: %v", err)
+			logger.Fatalf("error opening log file: %v", err)
 		}
 		f.Write(logBuf.Bytes()) // Write log output prior to this point
-		log.Printf("suppress stderr logging (redirected to %s)", f.Name())
-		log.SetOutput(f)
+		logger.Printf("suppress stderr logging (redirected to %s)", f.Name())
+		logger.SetOutput(f)
 		closer = f.Close
 	}
 
 	// Parse all of the private keys.
 	var keys []ssh.Signer
 	if len(config.KeyFiles) == 0 {
-		log.Fatal("no private keys specified")
+		logger.Fatal("no private keys specified")
 	}
 	for _, kf := range config.KeyFiles {
 		b, err := ioutil.ReadFile(kf)
 		if err != nil {
-			log.Fatalf("private key error: %v", err)
+			logger.Fatalf("private key error: %v", err)
 		}
 		k, err := ssh.ParsePrivateKey(b)
 		if err != nil {
-			log.Fatalf("private key error: %v", err)
+			logger.Fatalf("private key error: %v", err)
 		}
 		keys = append(keys, k)
 	}
@@ -189,11 +188,11 @@ func loadConfig(conf string) (tunns []tunnel, closer func() error) {
 
 	// Parse all of the host public keys.
 	if len(config.KnownHostFiles) == 0 {
-		log.Fatal("no host public keys specified")
+		logger.Fatal("no host public keys specified")
 	}
 	hostKeys, err := knownhosts.New(config.KnownHostFiles...)
 	if err != nil {
-		log.Fatalf("public key error: %v", err)
+		logger.Fatalf("public key error: %v", err)
 	}
 
 	// Parse all of the tunnels.
@@ -201,7 +200,7 @@ func loadConfig(conf string) (tunns []tunnel, closer func() error) {
 		var tunn tunnel
 		tt := strings.Fields(t.Tunnel)
 		if len(tt) != 3 {
-			log.Fatalf("invalid tunnel syntax: %s", t.Tunnel)
+			logger.Fatalf("invalid tunnel syntax: %s", t.Tunnel)
 		}
 
 		// Parse for the tunnel endpoints.
@@ -211,11 +210,11 @@ func loadConfig(conf string) (tunns []tunnel, closer func() error) {
 		case "<-":
 			tunn.dialAddr, tunn.mode, tunn.bindAddr = tt[0], '<', tt[2]
 		default:
-			log.Fatalf("invalid tunnel syntax: %s", t.Tunnel)
+			logger.Fatalf("invalid tunnel syntax: %s", t.Tunnel)
 		}
 		for _, addr := range []string{tunn.bindAddr, tunn.dialAddr} {
 			if _, _, err := net.SplitHostPort(addr); err != nil {
-				log.Fatalf("invalid endpoint: %s", addr)
+				logger.Fatalf("invalid endpoint: %s", addr)
 			}
 		}
 
@@ -229,14 +228,14 @@ func loadConfig(conf string) (tunns []tunnel, closer func() error) {
 			tunn.hostAddr = net.JoinHostPort(tunn.hostAddr, "22")
 		}
 		if _, _, err := net.SplitHostPort(tunn.hostAddr); err != nil {
-			log.Fatalf("invalid server: %s", t.Server)
+			logger.Fatalf("invalid server: %s", t.Server)
 		}
 
 		// Parse for the SSH user.
 		if tunn.user == "" {
 			u, err := user.Current()
 			if err != nil {
-				log.Fatalf("unexpected error: %v", err)
+				logger.Fatalf("unexpected error: %v", err)
 			}
 			tunn.user = u.Username
 		}
@@ -248,10 +247,11 @@ func loadConfig(conf string) (tunns []tunnel, closer func() error) {
 		}
 		tunn.auth = auth
 		tunn.hostKeys = hostKeys
+		tunn.log = logger
 		tunns = append(tunns, tunn)
 	}
 
-	return tunns, closer
+	return tunns, logger, closer
 }
 
 func main() {
@@ -260,7 +260,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\t%s CONFIG_PATH\n", os.Args[0])
 		os.Exit(1)
 	}
-	tunns, closer := loadConfig(os.Args[1])
+	tunns, logger, closer := loadConfig(os.Args[1])
 	defer closer()
 
 	// Setup signal handler to initiate shutdown.
@@ -268,14 +268,14 @@ func main() {
 	go func() {
 		sigc := make(chan os.Signal, 1)
 		signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
-		log.Printf("received %v - initiating shutdown", <-sigc)
+		logger.Printf("received %v - initiating shutdown", <-sigc)
 		cancel()
 	}()
 
 	// Start a bridge for each tunnel.
 	var wg sync.WaitGroup
-	log.Printf("%s starting", path.Base(os.Args[0]))
-	defer log.Printf("%s shutdown", path.Base(os.Args[0]))
+	logger.Printf("%s starting", path.Base(os.Args[0]))
+	defer logger.Printf("%s shutdown", path.Base(os.Args[0]))
 	for _, t := range tunns {
 		wg.Add(1)
 		go t.bindTunnel(ctx, &wg)
