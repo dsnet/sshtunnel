@@ -278,7 +278,7 @@ func main() {
 	defer log.Printf("%s shutdown", path.Base(os.Args[0]))
 	for _, t := range tunns {
 		wg.Add(1)
-		go bindTunnel(ctx, &wg, t)
+		go t.bindTunnel(ctx, &wg)
 	}
 	wg.Wait()
 }

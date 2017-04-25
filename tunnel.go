@@ -43,37 +43,37 @@ func (t tunnel) String() string {
 
 var retryPeriod = 30 * time.Second
 
-func bindTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel) {
+func (t tunnel) bindTunnel(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for {
 		var once sync.Once // Only print errors once per session
 		func() {
 			// Connect to the server host via SSH.
-			cl, err := ssh.Dial("tcp", tunn.hostAddr, &ssh.ClientConfig{
-				User:            tunn.user,
-				Auth:            tunn.auth,
-				HostKeyCallback: tunn.hostKeys,
+			cl, err := ssh.Dial("tcp", t.hostAddr, &ssh.ClientConfig{
+				User:            t.user,
+				Auth:            t.auth,
+				HostKeyCallback: t.hostKeys,
 				Timeout:         5 * time.Second,
 			})
 			if err != nil {
-				once.Do(func() { log.Printf("(%v) SSH dial error: %v", tunn, err) })
+				once.Do(func() { log.Printf("(%v) SSH dial error: %v", t, err) })
 				return
 			}
 			wg.Add(1)
-			go keepAliveMonitor(&once, wg, tunn, cl)
+			go t.keepAliveMonitor(&once, wg, cl)
 			defer cl.Close()
 
 			// Attempt to bind to the inbound socket.
 			var ln net.Listener
-			switch tunn.mode {
+			switch t.mode {
 			case '>':
-				ln, err = net.Listen("tcp", tunn.bindAddr)
+				ln, err = net.Listen("tcp", t.bindAddr)
 			case '<':
-				ln, err = cl.Listen("tcp", tunn.bindAddr)
+				ln, err = cl.Listen("tcp", t.bindAddr)
 			}
 			if err != nil {
-				once.Do(func() { log.Printf("(%v) bind error: %v", tunn, err) })
+				once.Do(func() { log.Printf("(%v) bind error: %v", t, err) })
 				return
 			}
 
@@ -90,18 +90,18 @@ func bindTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel) {
 				ln.Close()
 			}()
 
-			log.Printf("(%v) binded tunnel", tunn)
-			defer log.Printf("(%v) collapsed tunnel", tunn)
+			log.Printf("(%v) binded tunnel", t)
+			defer log.Printf("(%v) collapsed tunnel", t)
 
 			// Accept all incoming connections.
 			for {
 				cn1, err := ln.Accept()
 				if err != nil {
-					once.Do(func() { log.Printf("(%v) accept error: %v", tunn, err) })
+					once.Do(func() { log.Printf("(%v) accept error: %v", t, err) })
 					return
 				}
 				wg.Add(1)
-				go dialTunnel(bindCtx, wg, tunn, cl, cn1)
+				go t.dialTunnel(bindCtx, wg, cl, cn1)
 			}
 		}()
 
@@ -109,12 +109,12 @@ func bindTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel) {
 		case <-ctx.Done():
 			return
 		case <-time.After(retryPeriod):
-			log.Printf("(%v) retrying...", tunn)
+			log.Printf("(%v) retrying...", t)
 		}
 	}
 }
 
-func dialTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel, client *ssh.Client, cn1 net.Conn) {
+func (t tunnel) dialTunnel(ctx context.Context, wg *sync.WaitGroup, client *ssh.Client, cn1 net.Conn) {
 	defer wg.Done()
 
 	// The inbound connection is established. Make sure we close it eventually.
@@ -128,14 +128,14 @@ func dialTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel, client *ss
 	// Establish the outbound connection.
 	var cn2 net.Conn
 	var err error
-	switch tunn.mode {
+	switch t.mode {
 	case '>':
-		cn2, err = client.Dial("tcp", tunn.dialAddr)
+		cn2, err = client.Dial("tcp", t.dialAddr)
 	case '<':
-		cn2, err = net.Dial("tcp", tunn.dialAddr)
+		cn2, err = net.Dial("tcp", t.dialAddr)
 	}
 	if err != nil {
-		log.Printf("(%v) dial error: %v", tunn, err)
+		log.Printf("(%v) dial error: %v", t, err)
 		return
 	}
 
@@ -144,8 +144,8 @@ func dialTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel, client *ss
 		cn2.Close()
 	}()
 
-	log.Printf("(%v) connection established", tunn)
-	defer log.Printf("(%v) connection closed", tunn)
+	log.Printf("(%v) connection established", t)
+	defer log.Printf("(%v) connection closed", t)
 
 	// Copy bytes from one connection to the other until one side closes.
 	var once sync.Once
@@ -155,7 +155,7 @@ func dialTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel, client *ss
 		defer wg2.Done()
 		defer cancel()
 		if _, err := io.Copy(cn1, cn2); err != nil {
-			once.Do(func() { log.Printf("(%v) connection error: %v", tunn, err) })
+			once.Do(func() { log.Printf("(%v) connection error: %v", t, err) })
 		}
 		once.Do(func() {}) // Suppress future errors
 	}()
@@ -163,7 +163,7 @@ func dialTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel, client *ss
 		defer wg2.Done()
 		defer cancel()
 		if _, err := io.Copy(cn2, cn1); err != nil {
-			once.Do(func() { log.Printf("(%v) connection error: %v", tunn, err) })
+			once.Do(func() { log.Printf("(%v) connection error: %v", t, err) })
 		}
 		once.Do(func() {}) // Suppress future errors
 	}()
@@ -173,9 +173,9 @@ func dialTunnel(ctx context.Context, wg *sync.WaitGroup, tunn tunnel, client *ss
 // keepAliveMonitor periodically sends messages to invoke a response.
 // If the server does not respond after some period of time,
 // assume that the underlying net.Conn abruptly died.
-func keepAliveMonitor(once *sync.Once, wg *sync.WaitGroup, tunn tunnel, client *ssh.Client) {
+func (t tunnel) keepAliveMonitor(once *sync.Once, wg *sync.WaitGroup, client *ssh.Client) {
 	defer wg.Done()
-	if tunn.keepAlive.Interval == 0 || tunn.keepAlive.CountMax == 0 {
+	if t.keepAlive.Interval == 0 || t.keepAlive.CountMax == 0 {
 		return
 	}
 
@@ -189,18 +189,18 @@ func keepAliveMonitor(once *sync.Once, wg *sync.WaitGroup, tunn tunnel, client *
 
 	// Repeatedly check if the remote server is still alive.
 	var aliveCount int32
-	ticker := time.NewTicker(time.Duration(tunn.keepAlive.Interval) * time.Second)
+	ticker := time.NewTicker(time.Duration(t.keepAlive.Interval) * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case err := <-wait:
 			if err != nil && err != io.EOF {
-				once.Do(func() { log.Printf("(%v) SSH error: %v", tunn, err) })
+				once.Do(func() { log.Printf("(%v) SSH error: %v", t, err) })
 			}
 			return
 		case <-ticker.C:
-			if n := atomic.AddInt32(&aliveCount, 1); n > int32(tunn.keepAlive.CountMax) {
-				once.Do(func() { log.Printf("(%v) SSH keep-alive termination", tunn) })
+			if n := atomic.AddInt32(&aliveCount, 1); n > int32(t.keepAlive.CountMax) {
+				once.Do(func() { log.Printf("(%v) SSH keep-alive termination", t) })
 				client.Close()
 				return
 			}
