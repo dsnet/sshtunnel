@@ -41,6 +41,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/dsnet/golib/jsonutil"
 	"golang.org/x/crypto/ssh"
@@ -245,6 +246,7 @@ func loadConfig(conf string) (tunns []tunnel, logger *log.Logger, closer func() 
 		} else {
 			tunn.keepAlive = *t.KeepAlive
 		}
+		tunn.retryInterval = 30 * time.Second
 		tunn.auth = auth
 		tunn.hostKeys = hostKeys
 		tunn.log = logger

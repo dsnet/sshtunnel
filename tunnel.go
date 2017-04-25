@@ -29,7 +29,8 @@ type tunnel struct {
 	bindAddr string
 	dialAddr string
 
-	keepAlive KeepAliveConfig
+	retryInterval time.Duration
+	keepAlive     KeepAliveConfig
 
 	log logger
 }
@@ -45,8 +46,6 @@ func (t tunnel) String() string {
 	}
 	return fmt.Sprintf("%s@%s | %s %s %s", t.user, t.hostAddr, left, mode, right)
 }
-
-var retryPeriod = 30 * time.Second
 
 func (t tunnel) bindTunnel(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
@@ -113,7 +112,7 @@ func (t tunnel) bindTunnel(ctx context.Context, wg *sync.WaitGroup) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(retryPeriod):
+		case <-time.After(t.retryInterval):
 			t.log.Printf("(%v) retrying...", t)
 		}
 	}

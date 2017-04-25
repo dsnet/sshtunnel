@@ -29,11 +29,6 @@ type testLogger struct {
 func (t testLogger) Printf(f string, x ...interface{}) { t.Logf(f, x...) }
 
 func TestTunnel(t *testing.T) {
-	// Set retry period shorter to make test run faster.
-	oldRetryPeriod := retryPeriod
-	retryPeriod = time.Second
-	defer func() { retryPeriod = oldRetryPeriod }()
-
 	rootWG := new(sync.WaitGroup)
 	defer rootWG.Wait()
 	rootCtx, cancelAll := context.WithCancel(context.Background())
@@ -101,6 +96,7 @@ func TestTunnel(t *testing.T) {
 	go tn0.bindTunnel(ctx, wg)
 	go tn1.bindTunnel(ctx, wg)
 
+	t.Log("test started")
 	done := make(chan bool, 10)
 
 	// Start all the transmitters.
@@ -189,11 +185,12 @@ func TestTunnel(t *testing.T) {
 	for i := 0; i < cap(done); i++ {
 		select {
 		case <-done:
-		case <-time.After(30 * time.Second):
+		case <-time.After(10 * time.Second):
 			t.Errorf("timed out: %d remaining", cap(done)-i)
 			return
 		}
 	}
+	t.Log("test complete")
 }
 
 // generateKeys generates a random pair of SSH private and public keys.
