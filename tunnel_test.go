@@ -10,7 +10,6 @@ import (
 	"crypto/md5"
 	"crypto/rsa"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -212,7 +211,7 @@ func generateKeys(t *testing.T) (priv ssh.Signer, pub ssh.PublicKey) {
 }
 
 func openListener(t *testing.T) net.Listener {
-	ln, err := net.Listen("tcp", fmt.Sprintf(":0"))
+	ln, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatalf("listen error: %v", err)
 	}
