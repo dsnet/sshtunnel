@@ -25,7 +25,7 @@ import (
 //
 // The server listens on the provided Listener and will present to clients
 // a certificate from serverKey and will only accept users that match
-// the provider clientKeys. Only users of the name "user%d" are allowed where
+// the provided clientKeys. Only users of the name "user%d" are allowed where
 // the ID number is the index for the specified client key provided.
 func runServer(t *testing.T, ctx context.Context, ln net.Listener, serverKey ssh.Signer, clientKeys ...ssh.PublicKey) {
 	wg := new(sync.WaitGroup)
