@@ -43,7 +43,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dsnet/golib/jsonutil"
+	"github.com/dsnet/golib/jsonfmt"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
@@ -131,7 +131,7 @@ func loadConfig(conf string) (tunns []tunnel, logger *log.Logger, closer func() 
 	if err != nil {
 		logger.Fatalf("unable to read config: %v", err)
 	}
-	c, _ = jsonutil.Minify(c)
+	c, _ = jsonfmt.Format(c, jsonfmt.Minify())
 	if err := json.Unmarshal(c, &config); err != nil {
 		logger.Fatalf("unable to decode config: %v", err)
 	}
