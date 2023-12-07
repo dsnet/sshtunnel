@@ -22,6 +22,12 @@ Create a configuration file:
 ```javascript
 {
 	"KeyFiles": ["/path/to/key.priv"],
+
+	// AgentSocket can be empty or path to the ssh-agent socket.
+	// "AgentSocket": "/path/to/ssh_agent.sock",
+	// Or with the following to cooperate with envsubst(1):
+	// "AgentSocket": "$SSH_AUTH_SOCK", 
+	
 	"KnownHostFiles": ["/path/to/known_hosts"],
 	"Tunnels": [{
 		// Forward tunnel (locally binded socket proxies to remote target).
@@ -44,4 +50,8 @@ ssh $USER@$HOST -i /path/to/key.priv -R $BIND_ADDRESS:$BIND_PORT:$DIAL_ADDRESS:$
 
 Start the daemon (assuming `$GOPATH/bin` is in your `$PATH`):
 
-```sshtunnel /path/to/config.json```
+```bash
+sshtunnel /path/to/config.json
+# With the following to cooperate with envsubst(1):
+# sshtunnel <(envsubst < /path/to/config.json)
+```
