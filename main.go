@@ -51,9 +51,16 @@ import (
 var version string
 
 type TunnelConfig struct {
-	// LogFile is where the proxy daemon will direct its output log.
-	// If the path is empty, then the server will output to os.Stderr.
-	LogFile string `json:",omitempty"`
+	// Log configures how log lines are produced by zsync.
+	Log struct {
+		// File is where the daemon will direct its output log.
+		// If the path is empty, then the log outputs to os.Stderr.
+		File string `json:",omitempty"`
+
+		// ExcludeTimestamp specifies that a timestamp should not be logged.
+		// This is useful if another mechanism (e.g., systemd) records timestamps.
+		ExcludeTimestamp bool `json:",omitempty"`
+	}
 
 	// KeyFiles is a list of SSH private key files.
 	KeyFiles []string
@@ -143,6 +150,9 @@ func loadConfig(conf string) (tunns []tunnel, logger *log.Logger, closer func() 
 			break
 		}
 	}
+	if config.Log.ExcludeTimestamp {
+		logger.SetFlags(log.Lshortfile)
+	}
 
 	// Print the configuration.
 	var b bytes.Buffer
@@ -157,11 +167,11 @@ func loadConfig(conf string) (tunns []tunnel, logger *log.Logger, closer func() 
 	logger.Printf("loaded config:\n%s", b.String())
 
 	// Setup the log output.
-	if config.LogFile == "" {
+	if config.Log.File == "" {
 		logger.SetOutput(os.Stderr)
 		closer = func() error { return nil }
 	} else {
-		f, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0664)
+		f, err := os.OpenFile(config.Log.File, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0664)
 		if err != nil {
 			logger.Fatalf("error opening log file: %v", err)
 		}
