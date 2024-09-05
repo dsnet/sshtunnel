@@ -11,7 +11,6 @@ import (
 	"crypto/rsa"
 	"encoding/binary"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"sync"
@@ -162,7 +161,7 @@ func TestTunnel(t *testing.T) {
 					t.Errorf("copy error: %v", err)
 					break
 				}
-				wantHash, err := ioutil.ReadAll(cnEnd)
+				wantHash, err := io.ReadAll(cnEnd)
 				if err != nil {
 					t.Errorf("read hash error: %v", err)
 					break

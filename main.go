@@ -31,7 +31,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -43,7 +42,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dsnet/golib/jsonfmt"
+	"github.com/tailscale/hujson"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
@@ -121,17 +120,18 @@ func loadConfig(conf string) (tunns []tunnel, logger *log.Logger, closer func() 
 	logger = log.New(io.MultiWriter(os.Stderr, &logBuf), "", log.Ldate|log.Ltime|log.Lshortfile)
 
 	var hash string
-	if b, _ := ioutil.ReadFile(os.Args[0]); len(b) > 0 {
+	if b, _ := os.ReadFile(os.Args[0]); len(b) > 0 {
 		hash = fmt.Sprintf("%x", sha256.Sum256(b))
 	}
 
 	// Load configuration file.
 	var config TunnelConfig
-	c, err := ioutil.ReadFile(conf)
+	c, err := os.ReadFile(conf)
 	if err != nil {
 		logger.Fatalf("unable to read config: %v", err)
 	}
-	if c, err = jsonfmt.Format(c, jsonfmt.Standardize()); err != nil {
+	c, _ = hujson.Standardize(c)
+	if c, err = hujson.Format(c); err != nil {
 		logger.Fatalf("unable to parse config: %v", err)
 	}
 	if err := json.Unmarshal(c, &config); err != nil {
@@ -177,7 +177,7 @@ func loadConfig(conf string) (tunns []tunnel, logger *log.Logger, closer func() 
 		logger.Fatal("no private keys specified")
 	}
 	for _, kf := range config.KeyFiles {
-		b, err := ioutil.ReadFile(kf)
+		b, err := os.ReadFile(kf)
 		if err != nil {
 			logger.Fatalf("private key error: %v", err)
 		}
