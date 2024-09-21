@@ -9,6 +9,7 @@
 //
 //	{
 //		"KeyFiles": ["/path/to/key.priv"],
+//		"AgentSocket": "/path/to/ssh_agent.sock",
 //		"KnownHostFiles": ["/path/to/known_hosts"],
 //		"Tunnels": [{
 //			// Forward tunnel (locally binded socket proxies to remote target).
@@ -44,6 +45,7 @@ import (
 
 	"github.com/tailscale/hujson"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
@@ -64,6 +66,10 @@ type TunnelConfig struct {
 
 	// KeyFiles is a list of SSH private key files.
 	KeyFiles []string
+
+	// AgentSocket is the path to a unix socket from the SSH agent.
+	// If the path is empty, then no agent is used.
+	AgentSocket string `json:",omitempty"`
 
 	// KnownHostFiles is a list of key database files for host public keys
 	// in the OpenSSH known_hosts file format.
@@ -120,6 +126,20 @@ type KeepAliveConfig struct {
 	// keep-alive messages the client is willing to tolerate before considering
 	// the SSH connection as dead.
 	CountMax uint
+}
+
+func setupSSHAgent(socket string) ssh.AuthMethod {
+	if len(socket) == 0 {
+		return nil
+	}
+
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		log.Fatalf("failed to dial SSH_AUTH_SOCK %s: %v\n", socket, err)
+	}
+
+	agentClient := agent.NewClient(conn)
+	return ssh.PublicKeysCallback(agentClient.Signers)
 }
 
 func loadConfig(conf string) (tunns []tunnel, logger *log.Logger, closer func() error) {
@@ -181,11 +201,10 @@ func loadConfig(conf string) (tunns []tunnel, logger *log.Logger, closer func() 
 		closer = f.Close
 	}
 
+	var auth []ssh.AuthMethod
+
 	// Parse all of the private keys.
 	var keys []ssh.Signer
-	if len(config.KeyFiles) == 0 {
-		logger.Fatal("no private keys specified")
-	}
 	for _, kf := range config.KeyFiles {
 		b, err := os.ReadFile(kf)
 		if err != nil {
@@ -197,7 +216,18 @@ func loadConfig(conf string) (tunns []tunnel, logger *log.Logger, closer func() 
 		}
 		keys = append(keys, k)
 	}
-	auth := []ssh.AuthMethod{ssh.PublicKeys(keys...)}
+	if len(keys) > 0 {
+		auth = append(auth, ssh.PublicKeys(keys...))
+	}
+
+	agent := setupSSHAgent(config.AgentSocket)
+	if agent != nil {
+		auth = append(auth, agent)
+	}
+
+	if len(auth) == 0 {
+		logger.Panic("no private keys and ssh-agent usable")
+	}
 
 	// Parse all of the host public keys.
 	if len(config.KnownHostFiles) == 0 {
