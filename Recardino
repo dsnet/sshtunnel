@@ -1,0 +1,13 @@
+{
+	"KeyFiles": ["/path/to/key.priv"],
+	"KnownHostFiles": ["/path/to/known_hosts"],
+	"Tunnels": [{
+		// Forward tunnel (locally binded socket proxies to remote target).
+		"Tunnel": "bind_address:port -> dial_address:port",
+		"Server": "user@host",
+	}, {
+		// Reverse tunnel (remotely binded socket proxies to local target).
+		"Tunnel": "dial_address:port <- bind_address:port",
+		"Server": "user@host",
+	}],
+}
